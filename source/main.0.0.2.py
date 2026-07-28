@@ -163,7 +163,7 @@ pyautogui.FAILSAFE = True
 WHEAT_RIPE_TEMPLATES = ["wheat_ripe.png", "wheat_ripe_2.png"]
 
 # รายชื่อแม่แบบเคียวเกี่ยวข้าว
-SICKLE_TEMPLATES = ["sickle_2.png", "sickleหหห.png", "sickle.png"]
+SICKLE_TEMPLATES = ["sickle.png", "sickle1.png", "sickle2.png"]
 
 IMAGE_SEED = "wheat_seed.png"
 SOIL_TEMPLATES = ["empty_soil1.png", "empty_soil2.png"]

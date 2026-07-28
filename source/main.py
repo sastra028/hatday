@@ -164,7 +164,6 @@ IMAGE_SICKLE = "sickle.png"
 IMAGE_SEED = "wheat_seed.png"
 SOIL_TEMPLATES = ["empty_soil1.png", "empty_soil2.png"]
 
-
 def resource_path(relative_path):
     try:
         base_path = sys._MEIPASS
@@ -291,6 +290,38 @@ def is_ignored_zone(check_x, check_y, threshold_distance=40):
     return False
 
 
+WHEAT_RIPE_TEMPLATES = ["wheat_ripe.png", "wheat_ripe_2.png", "wheat_ripe_3.png"]
+def find_any_ripe_crop(confidence=0.68):
+    """🌾 สแกนหาพืชสุกจาก List รูปภาพ WHEAT_RIPE_TEMPLATES"""
+    screenshot = pyautogui.screenshot()
+    screenshot_bgr = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+    screenshot_masked = apply_ui_mask_color(screenshot_bgr)
+
+    for crop_img in WHEAT_RIPE_TEMPLATES:
+        template = load_image_safe(crop_img)
+        if template is None:
+            continue
+
+        result = cv2.matchTemplate(
+            screenshot_masked, template, cv2.TM_CCOEFF_NORMED
+        )
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+
+        if max_val >= confidence:
+            h, w, _ = template.shape
+            center_x = max_loc[0] + w // 2 + random.randint(-2, 2)
+            center_y = max_loc[1] + h // 2 + random.randint(-2, 2)
+
+            if is_ignored_zone(center_x, center_y):
+                continue
+
+            print(
+                f"✅ พบพืชสุกด้วยรูป: {crop_img} (Score: {max_val:.2f}) ที่พิกัด ({center_x}, {center_y})"
+            )
+            return (center_x, center_y)
+
+    return None
+
 def find_and_get_center(template_path, confidence=0.75):
     """ค้นหารูปภาพ และเช็กข้ามไอคอนที่ Ignore"""
     template = load_image_safe(template_path)
@@ -371,12 +402,84 @@ def plant_crops(soil_pos):
     print("✨ สั่งปลูกเรียบร้อย!")
 
 
+SICKLE_TEMPLATES = ["sickle.png", "sickle1.png", "sickle2.png" "sickle3.png" "sickle4.png"]
+def find_sickle(confidence=0.50):
+    """⛏️ สแกนหาเคียวเกี่ยวข้าว รองรับ Alpha Channel โปร่งใส"""
+    screenshot = pyautogui.screenshot()
+    screenshot_bgr = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+
+    # ปิดเฉพาะขอบจอด้านขวา เพื่อให้เปิดโล่งโซนแปลงผัก/เคียวฝั่งซ้าย
+    h_scr, w_scr, _ = screenshot_bgr.shape
+    cv2.rectangle(
+        screenshot_bgr,
+        (int(w_scr * 0.70), 0),
+        (w_scr, int(h_scr * 0.50)),
+        (0, 0, 0),
+        -1,
+    )
+
+    for sickle_file in SICKLE_TEMPLATES:
+        template_bgr, template_mask = load_image_safe_with_alpha(sickle_file)
+        if template_bgr is None:
+            continue
+
+        if template_mask is not None:
+            result = cv2.matchTemplate(
+                screenshot_bgr,
+                template_bgr,
+                cv2.TM_CCORR_NORMED,
+                mask=template_mask,
+            )
+        else:
+            result = cv2.matchTemplate(
+                screenshot_bgr, template_bgr, cv2.TM_CCOEFF_NORMED
+            )
+
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+
+        if max_val >= confidence:
+            h, w, _ = template_bgr.shape
+            center_x = max_loc[0] + w // 2
+            center_y = max_loc[1] + h // 2
+            print(
+                f" ⛏️ พบเคียวด้วยรูป: {sickle_file} (Score: {max_val:.2f}) ที่พิกัด ({center_x}, {center_y})"
+            )
+            return (center_x, center_y)
+
+    return None
+def load_image_safe_with_alpha(relative_path):
+    """โหลดภาพคงค่า Alpha Channel ไว้สำหรับสแกนภาพโปร่งใส (เคียว)"""
+    full_path = resource_path(relative_path)
+    if not os.path.exists(full_path):
+        return None, None
+
+    try:
+        with open(full_path, "rb") as f:
+            file_bytes = bytearray(f.read())
+        img_array = np.asarray(file_bytes, dtype=np.uint8)
+        img = cv2.imdecode(img_array, cv2.IMREAD_UNCHANGED)
+
+        if img is None:
+            return None, None
+
+        if len(img.shape) == 3 and img.shape[2] == 4:
+            bgr = img[:, :, :3]
+            alpha = img[:, :, 3]
+            return bgr, alpha
+        else:
+            return img, None
+    except Exception as e:
+        print(f"❌ Error loading image with alpha ({full_path}): {e}")
+        return None, None
+
 def harvest_and_plant_process():
     """ตรรกะหลัก: เกี่ยวข้าว -> ปลูกซ่อม"""
     print("\n🔍 กำลังสแกนฟาร์ม...")
 
     # 1. ตรวจหาข้าวสาลีสุก (ภาพสี)
-    ripe_pos = find_and_get_center(IMAGE_WHEAT_RIPE, confidence=0.72)
+    #ripe_pos = find_and_get_center(IMAGE_WHEAT_RIPE, confidence=0.72)
+
+    ripe_pos = find_any_ripe_crop(confidence=0.68)
 
     if ripe_pos:
         print(f"✅ เจอแปลงข้าวสาลีสุกที่พิกัด {ripe_pos}!")
@@ -385,7 +488,8 @@ def harvest_and_plant_process():
         time.sleep(0.6)
 
         # 2. ค้นหาเคียวแบบภาพสี (เปิด Mask ขวาบนป้องกันการคลิกหลุดไปขวาบน)
-        sickle_pos = find_and_get_center(IMAGE_SICKLE, confidence=0.60)
+        #sickle_pos = find_and_get_center(IMAGE_SICKLE, confidence=0.60)
+        sickle_pos = find_sickle(confidence=0.50)
 
         if sickle_pos:
             print(f" ⛏️ เจอเคียวที่ {sickle_pos}! กำลังลากเคียวเกี่ยวข้าว...")
