@@ -1,0 +1,6 @@
+﻿source/build/main
+source/dist/pyarmor_runtime_000000/__pycache__
+source/dist/pyarmor_runtime_000000
+source/config.json
+source/main.spec
+source/dist
