@@ -1,0 +1,14 @@
+[
+  {
+    "key": "DESKTOP-ABC1234_00:1A:2C:3D:4E:5F",
+    "status": "active",
+    "expire": "30-09-2026",
+    "note": "User Account 1"
+  },
+  {
+    "key": "LAPTOP-DEV9999_A1:B2:C3:D4:E5:F6",
+    "status": "active",
+    "expire": "15-12-2026",
+    "note": "User Account 2"
+  }
+]
