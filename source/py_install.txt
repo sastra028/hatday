@@ -1,0 +1,4 @@
+pip install pyautogui opencv-python pillow numpy
+pip install keyboard
+pip install pyautogui opencv-python pillow numpy keyboard
+pip install pyarmor pyinstaller
