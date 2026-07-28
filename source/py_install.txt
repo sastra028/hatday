@@ -2,3 +2,8 @@ pip install pyautogui opencv-python pillow numpy
 pip install keyboard
 pip install pyautogui opencv-python pillow numpy keyboard
 pip install pyarmor pyinstaller
+pip install requests
+python -m pip install requests
+pip install pyautogui keyboard pynput
+
+pip install pyautogui opencv-python pillow numpy keyboard pyinstaller pyarmor requests
