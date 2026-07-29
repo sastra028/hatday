@@ -12,7 +12,6 @@ import keyboard
 import numpy as np
 import pyautogui
 import requests
-from PIL import ImageGrab
 
 # ==========================================
 # ⚙️ GITHUB CONFIGURATION
@@ -162,23 +161,19 @@ if __name__ == "__main__":
 # ==========================================
 SOIL_TEMPLATES = ["empty_soil1.png", "empty_soil2.png"]
 CORN_SEED_TEMPLATES = ["wheat_seed.png", "corn_seed.png"]  # เมล็ดพืชที่จะปลูก
-
-# 🛠️ แก้ไข: เพิ่มคอมมา (,) ให้ถูกต้องครบถ้วน
-SICKLE_TEMPLATES = [
-    "sickle.png",
-    "sickle1.png",
-    "sickle2.png",
-    "sickle3.png",
-    "sickle4.png",
-]
-
+SICKLE_TEMPLATES = ["sickle.png", "sickle1.png", "sickle2.png" "sickle3.png" "sickle4.png"]
 CROP_RIPE_TEMPLATES = ["wheat_ripe.png", "wheat_ripe_2.png", "wheat_ripe_3.png"]
 POPUP_CLOSE_TEMPLATES = ["close_btn.png", "ok_btn.png", "x_button.png"]
 
-IGNORE_TEMPLATES = ["ignore_shop.png", "1.png", "2.png", "3.png"]
+IGNORE_TEMPLATES = [
+    "ignore_shop.png",
+    "1.png",
+    "2.png",
+    "3.png"
+]
+
 
 pyautogui.FAILSAFE = True
-
 
 # ==========================================
 # 🛠️ HELPER FUNCTIONS
@@ -197,7 +192,6 @@ def resource_path(relative_path):
             return img_in_images
     return full_path
 
-
 def load_image_safe(relative_path):
     full_path = resource_path(relative_path)
     if not os.path.exists(full_path):
@@ -209,7 +203,6 @@ def load_image_safe(relative_path):
         return cv2.imdecode(img_array, cv2.IMREAD_COLOR)
     except Exception:
         return None
-
 
 def load_image_safe_with_alpha(relative_path):
     full_path = resource_path(relative_path)
@@ -226,12 +219,11 @@ def load_image_safe_with_alpha(relative_path):
     except Exception:
         return None, None
 
-
 # ==========================================
 # 🚨 POPUP SCANNER & AUTO CLOSE
 # ==========================================
 def check_and_close_popups():
-    """ตรวจจับ Popup เกม และหน้าต่าง BlueStacks Prime แล้วปิดทันที"""
+    """*** ตรวจสอบ Popup/กากบาทเด้งขึ้นมาแทรก และทำการคลิกปิดทันที ***"""
     screenshot = pyautogui.screenshot()
     screenshot_bgr = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
 
@@ -240,21 +232,69 @@ def check_and_close_popups():
         if template is None:
             continue
 
-        result = cv2.matchTemplate(
-            screenshot_bgr, template, cv2.TM_CCOEFF_NORMED
-        )
+        result = cv2.matchTemplate(screenshot_bgr, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(result)
 
         if max_val >= 0.70:
             h, w, _ = template.shape
             btn_x = max_loc[0] + w // 2
             btn_y = max_loc[1] + h // 2
-            print(f"🚨 ปิด Popup เกมที่พิกัด ({btn_x}, {btn_y})")
+            print(f"🚨 ตรวจพบ Popup/กากบาท ({popup_file}) -> กำลังคลิกปิดที่ ({btn_x}, {btn_y})")
             pyautogui.click(btn_x, btn_y)
             time.sleep(0.5)
             return True
     return False
 
+# ==========================================
+# 📌 STEP 1: SCAN & REMEMBER ALL SOIL POSITIONS
+# ==========================================
+def scan_all_soils(confidence=0.50, min_dist=25):
+    """สแกนหาแปลงดินว่างทั้งหมด พร้อมระบบ Debug ค่า Score"""
+    check_and_close_popups()
+    screenshot = pyautogui.screenshot()
+    screenshot_bgr = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+
+    found_points = []
+    soil_height = 0
+    soil_width = 0
+
+    for soil_img in SOIL_TEMPLATES:
+        template = load_image_safe(soil_img)
+        if template is None:
+            print(f"⚠️ โหลดไฟล์แม่แบบไม่สำเร็จ: {soil_img}")
+            continue
+
+        h, w, _ = template.shape
+
+        result = cv2.matchTemplate(
+            screenshot_bgr, template, cv2.TM_CCOEFF_NORMED
+        )
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+
+        # 🔍 Print ดูค่าความเหมือนสูงสุดที่สแกนเจอ
+        print(f"🔍 สแกน {soil_img} -> ค่าความเหมือนสูงสุด (Best Match Score): {max_val:.2f}")
+
+        locs = np.where(result >= confidence)
+
+        for pt in zip(*locs[::-1]):
+            center_x = pt[0] + w // 2
+            center_y = pt[1] + h // 2
+
+            # NMS Filter
+            if not any(
+                np.hypot(center_x - px, center_y - py) < min_dist
+                for px, py in found_points
+            ):
+                found_points.append((center_x, center_y))
+                soil_height, soil_width = h, w
+
+    if not found_points:
+        return [], 0, 0
+
+    # เรียงลำดับพิกัดจากซ้ายบนไปขวาล่าง
+    found_points.sort(key=lambda p: (p[1] // 25, p[0]))
+    print(f"📍 สแกนพบแปลงดินว่างทั้งหมด {len(found_points)} แปลง")
+    return found_points, soil_width, soil_height
 
 # ==========================================
 # 🚜 DRAGGING PATH FUNCTION
@@ -274,17 +314,17 @@ def drag_smooth_path(start_pos, target_points):
     pyautogui.mouseUp(button="left")
     time.sleep(0.3)
 
-
 # ==========================================
 # 🔍 SEARCH SEED & SICKLE NEAR TOP-LEFT SOIL
 # ==========================================
 def find_seed_above_soil(top_left_soil, soil_height):
     """สแกนหาเมล็ดข้าวโพดฝั่งซ้ายบน สูงกว่าแปลงประมาณ 2 เท่า"""
     check_and_close_popups()
-
+    
+    # กำหนด Bounding Box ค้นหาบริเวณซ้ายบนเหนือแปลง
     search_center_x = top_left_soil[0] - 80
     search_center_y = top_left_soil[1] - (soil_height * 2)
-
+    
     screenshot = pyautogui.screenshot()
     screenshot_bgr = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
 
@@ -293,17 +333,15 @@ def find_seed_above_soil(top_left_soil, soil_height):
         if template is None:
             continue
 
-        result = cv2.matchTemplate(
-            screenshot_bgr, template, cv2.TM_CCOEFF_NORMED
-        )
+        result = cv2.matchTemplate(screenshot_bgr, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(result)
 
         if max_val >= 0.55:
             h, w, _ = template.shape
             return (max_loc[0] + w // 2, max_loc[1] + h // 2)
 
+    # Fallback: หากสแกนรูปไม่ติด ให้คืนพิกัดประมาณการด้านซ้ายบนสูงขึ้น 2 เท่า
     return (search_center_x, search_center_y)
-
 
 def find_sickle_near_soil(top_left_soil):
     """สแกนหาเคียวบริเวณมุมซ้ายบนของแปลง"""
@@ -317,16 +355,9 @@ def find_sickle_near_soil(top_left_soil):
             continue
 
         if template_mask is not None:
-            result = cv2.matchTemplate(
-                screenshot_bgr,
-                template_bgr,
-                cv2.TM_CCORR_NORMED,
-                mask=template_mask,
-            )
+            result = cv2.matchTemplate(screenshot_bgr, template_bgr, cv2.TM_CCORR_NORMED, mask=template_mask)
         else:
-            result = cv2.matchTemplate(
-                screenshot_bgr, template_bgr, cv2.TM_CCOEFF_NORMED
-            )
+            result = cv2.matchTemplate(screenshot_bgr, template_bgr, cv2.TM_CCOEFF_NORMED)
 
         _, max_val, _, max_loc = cv2.minMaxLoc(result)
 
@@ -334,8 +365,8 @@ def find_sickle_near_soil(top_left_soil):
             h, w, _ = template_bgr.shape
             return (max_loc[0] + w // 2, max_loc[1] + h // 2)
 
+    # Fallback: เยื้องซ้ายบนเล็กน้อย
     return (top_left_soil[0] - 50, top_left_soil[1] - 40)
-
 
 # ==========================================
 # 🌾 CHECK RIPE CROPS AT ELEVATED POSITIONS
@@ -348,30 +379,22 @@ def check_all_crops_ripe(soil_positions, soil_height, confidence=0.60):
 
     ripe_count = 0
     for soil_pt in soil_positions:
+        # พิกัดสแกน: ความสูงเพิ่มขึ้นประมาณ 1 เท่า (+Y ขึ้นด้านบน)
         crop_target_y = soil_pt[1] - soil_height
         crop_target_x = soil_pt[0]
 
-        y1, y2 = max(0, crop_target_y - 40), min(
-            screenshot_bgr.shape[0], crop_target_y + 40
-        )
-        x1, x2 = max(0, crop_target_x - 40), min(
-            screenshot_bgr.shape[1], crop_target_x + 40
-        )
+        # ครอปเฉพาะ Bounding Box รอบแปลงผักนั้นๆ มาสแกน
+        y1, y2 = max(0, crop_target_y - 40), min(screenshot_bgr.shape[0], crop_target_y + 40)
+        x1, x2 = max(0, crop_target_x - 40), min(screenshot_bgr.shape[1], crop_target_x + 40)
         crop_roi = screenshot_bgr[y1:y2, x1:x2]
 
         is_ripe = False
         for ripe_file in CROP_RIPE_TEMPLATES:
             template = load_image_safe(ripe_file)
-            if (
-                template is None
-                or crop_roi.shape[0] < template.shape[0]
-                or crop_roi.shape[1] < template.shape[1]
-            ):
+            if template is None or crop_roi.shape[0] < template.shape[0] or crop_roi.shape[1] < template.shape[1]:
                 continue
 
-            result = cv2.matchTemplate(
-                crop_roi, template, cv2.TM_CCOEFF_NORMED
-            )
+            result = cv2.matchTemplate(crop_roi, template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(result)
 
             if max_val >= confidence:
@@ -384,218 +407,6 @@ def check_all_crops_ripe(soil_positions, soil_height, confidence=0.60):
     print(f"🌾 สแกนตรวจสอบ: ข้าวโพดสุกแล้ว {ripe_count} / {len(soil_positions)} แปลง")
     return ripe_count >= len(soil_positions)
 
-IGNORE_TEMPLATES = [
-    "ignore_feed_mill.png",  # รูปเครื่องทำอาหารสัตว์
-    "ignore_shop.png",       # รูปกระดานออเดอร์
-    "ignore_oven.png",       # รูปเตาอบ
-]
-
-
-def apply_dynamic_ignore_mask(screenshot_bgr, roi_mask):
-    """ถมสีดำบน ROI Mask ในจุดที่เป็นสิ่งก่อสร้างรบกวน"""
-    for ignore_file in IGNORE_TEMPLATES:
-        template = load_image_safe(ignore_file)
-        if template is None:
-            continue
-
-        h, w, _ = template.shape
-        result = cv2.matchTemplate(
-            screenshot_bgr, template, cv2.TM_CCOEFF_NORMED
-        )
-
-        locs = np.where(result >= 0.50)
-        for pt in zip(*locs[::-1]):
-            # 📌 ขยาย Padding เป็น +50px รอบกระดาน/เตาอบ/เครื่องทำอาหาร
-            x1 = max(0, pt[0] - 50)
-            y1 = max(0, pt[1] - 50)
-            x2 = min(screenshot_bgr.shape[1], pt[0] + w + 50)
-            y2 = min(screenshot_bgr.shape[0], pt[1] + h + 50)
-            cv2.rectangle(roi_mask, (x1, y1), (x2, y2), 0, -1)
-
-    return roi_mask
-
-def mask_road_from_truck(screenshot_bgr, roi_mask):
-    """หาตำแหน่งรถขนส่ง แล้วถมสีดำปิดแถบถนนดินที่เชื่อมกับตัวรถ"""
-    truck_template = load_image_safe("truck.png")  # รูปตัวรถขนส่งสีส้ม-เขียว
-    if truck_template is None:
-        return roi_mask
-
-    h, w, _ = truck_template.shape
-    result = cv2.matchTemplate(
-        screenshot_bgr, truck_template, cv2.TM_CCOEFF_NORMED
-    )
-    _, max_val, _, max_loc = cv2.minMaxLoc(result)
-
-    # ถ้าเจอรถขนส่ง (Threshold >= 0.55)
-    if max_val >= 0.55:
-        tx, ty = max_loc  # พิกัดมุมซ้ายบนของตัวรถ
-        tc_x, tc_y = tx + w // 2, ty + h // 2  # จุดศูนย์กลางรถ
-
-        print(f"🚛 เจอรถขนส่งที่พิกัด: ({tc_x}, {tc_y}) -> เริ่มถมดำแนวถนน")
-
-        # 📌 สร้าง Polygon ถนนดินอ้างอิงจากตำแหน่งรถ (พาดจากซ้ายบน ลงมาผ่านตัวรถ และสโลปไปตามแนวถนน)
-        road_poly = np.array(
-            [
-                [0, 0],  # มุมซ้ายบนสุดของจอ
-                [tc_x + int(w * 0.8), ty - int(h * 0.5)],  # ด้านบนของถนนข้างรถ
-                [
-                    tc_x + int(w * 1.5),
-                    tc_y + int(h * 0.2),
-                ],  # ท้ายรถฝั่งขวา (ถนนที่มุ่งไปหาบ้าน)
-                [
-                    tc_x - int(w * 0.8),
-                    tc_y + int(h * 1.2),
-                ],  # ด้านล่างของรถ (ขอบถนนที่ติดกับแปลงผัก)
-                [0, tc_y + int(h * 1.5)],  # ขอบซ้ายล่างเหนือแปลงผัก
-            ],
-            np.int32,
-        )
-
-        # ถมสีดำ (0) ปิดแนวถนนทั้งหมดที่ลากผ่านรถ
-        cv2.fillPoly(roi_mask, [road_poly], 0)
-
-    else:
-        print("⚠️ สแกนไม่เจอกระบะรถขนส่ง ใช้ Fallback Static Polygon แทน")
-        # Fallback กรณีสแกนไม่เจอกระบะรถ
-        fallback_poly = np.array(
-            [
-                [0, 0],
-                [int(screenshot_bgr.shape[1] * 0.65), 0],
-                [
-                    int(screenshot_bgr.shape[1] * 0.50),
-                    int(screenshot_bgr.shape[0] * 0.55),
-                ],
-                [0, int(screenshot_bgr.shape[0] * 0.70)],
-            ],
-            np.int32,
-        )
-        cv2.fillPoly(roi_mask, [fallback_poly], 0)
-
-    return roi_mask
-
-
-def mask_oven_dynamically(screenshot_bgr, roi_mask):
-    """หาตำแหน่งเตาอบแล้วถมดำปิดกั้น ไม่ให้หลุดไปสแกนเจอฐานดินเตาอบ"""
-    oven_template = load_image_safe("oven.png")  # รูปเตาอบ / Bakery Oven
-    if oven_template is None:
-        # Fallback ถ้าไม่มีรูป oven.png ให้ถมดำโซนขวาบนคร่าวๆ ไว้ก่อน
-        cv2.rectangle(
-            roi_mask,
-            (int(screenshot_bgr.shape[1] * 0.65), 0),
-            (screenshot_bgr.shape[1], int(screenshot_bgr.shape[0] * 0.55)),
-            0,
-            -1,
-        )
-        return roi_mask
-
-    h, w, _ = oven_template.shape
-    result = cv2.matchTemplate(screenshot_bgr, oven_template, cv2.TM_CCOEFF_NORMED)
-    _, max_val, _, max_loc = cv2.minMaxLoc(result)
-
-    # ถ้าเจอเตาอบ (Threshold >= 0.55)
-    if max_val >= 0.55:
-        ox, oy = max_loc
-        print(f"🍞 เจอเตาอบที่พิกัด: ({ox}, {oy}) -> ถมดำปิดโซนเตาอบ")
-
-        # ถมดำขยายเผื่อขอบฐานดินของเตาอบออกไปอีกนิด (Padding 20px)
-        pad = 25
-        x1 = max(0, ox - pad)
-        y1 = max(0, oy - pad)
-        x2 = min(screenshot_bgr.shape[1], ox + w + pad)
-        y2 = min(screenshot_bgr.shape[0], oy + h + pad)
-
-        cv2.rectangle(roi_mask, (x1, y1), (x2, y2), 0, -1)
-    else:
-        # ถ้าสแกนไม่เจอ ให้ใช้ Fallback ถมดำโซนขวาบน
-        cv2.rectangle(
-            roi_mask,
-            (int(screenshot_bgr.shape[1] * 0.68), 0),
-            (screenshot_bgr.shape[1], int(screenshot_bgr.shape[0] * 0.55)),
-            0,
-            -1,
-        )
-
-    return roi_mask
-
-
-def scan_all_soils_by_color():
-    try:
-        check_and_close_popups()
-
-        screenshot = pyautogui.screenshot()
-        img_bgr = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
-        img_h, img_w, _ = img_bgr.shape
-
-        # 1. กำหนด ROI สแกนรอบนอก
-        roi_y1 = int(img_h * 0.30)
-        roi_y2 = int(img_h * 0.95)
-        roi_x1 = int(img_w * 0.15)
-        roi_x2 = int(img_w * 0.90)
-
-        roi_mask = np.zeros((img_h, img_w), dtype=np.uint8)
-        roi_mask[roi_y1:roi_y2, roi_x1:roi_x2] = 255
-
-        # 📌 2. ถมดำถนนดินโดยอ้างอิงจากตัวรถบรรทุก (Truck Relative Road Mask)
-        roi_mask = mask_road_from_truck(img_bgr, roi_mask)
-
-        # 📌 3. ถมดำเตาอบแบบ Dynamic (หาเตาอบเจอตรงไหน ถมดำตรงนั้นทันที)
-        roi_mask = mask_oven_dynamically(img_bgr, roi_mask)
-
-        # 4. Dynamic Ignore Mask เพิ่มเติม
-        roi_mask = apply_dynamic_ignore_mask(img_bgr, roi_mask)
-
-        # 5. กรองสี HSV โทนดิน
-        hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-        lower_brown = np.array([4, 50, 40])
-        upper_brown = np.array([25, 255, 230])
-
-        mask = cv2.inRange(hsv, lower_brown, upper_brown)
-        mask = cv2.bitwise_and(mask, mask, mask=roi_mask)
-
-        clean_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, clean_kernel)
-
-        # 📸 เซฟไฟล์ดูผลการตัดเตาอบและถนน
-        cv2.imwrite("debug_soil_mask.png", mask)
-
-        contours, _ = cv2.findContours(
-            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
-
-        soil_points = []
-        sample_w, sample_h = 90, 45
-
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-
-            if 200 <= area <= 6000:
-                x, y, w, h = cv2.boundingRect(cnt)
-                aspect_ratio = float(w) / h
-
-                if 0.9 <= aspect_ratio <= 3.0:
-                    cx = x + w // 2
-                    cy = y + h // 2
-
-                    if not any(
-                        np.hypot(cx - px, cy - py) < 20
-                        for px, py in soil_points
-                    ):
-                        soil_points.append((cx, cy))
-                        sample_w, sample_h = w, h
-
-        if not soil_points:
-            print("❌ ไม่พบแปลงผักในพื้นที่สแกน (เปิดดูไฟล์ debug_soil_mask.png)")
-            return [], 0, 0
-
-        soil_points.sort(key=lambda p: (p[1] // 30, p[0]))
-        print(f"📍 สแกนพบแปลงผักสำเร็จทั้งหมด {len(soil_points)} แปลง")
-
-        return soil_points, sample_w, sample_h
-
-    except Exception as e:
-        print(f"⚠️ เกิดข้อผิดพลาดใน scan_all_soils_by_color: {e}")
-        return [], 0, 0
-    
 # ==========================================
 # 🔄 MAIN LOOP WORKFLOW
 # ==========================================
@@ -604,19 +415,11 @@ def main_automation_loop():
     print("🚀 เริ่มสแกนและบันทึกพิกัดแปลงดินทั้งหมดในฟาร์ม...")
     print("---------------------------------------------------")
 
-    # 📌 ใช้ฟังก์ชันสแกนสี HSV ที่แม่นยำกว่า
-    result = scan_all_soils_by_color()
-
-    # เช็กว่าคืนค่ามาครบ 3 ตัวแปรไหม
-    if result and isinstance(result, tuple) and len(result) == 3:
-        soils, s_width, s_height = result
-    else:
-        soils, s_width, s_height = [], 0, 0
+    # ข้อ 1: สแกนและจำตำแหน่งทุกแปลง
+    soils, s_width, s_height = scan_all_soils()
 
     if not soils:
-        print(
-            "❌ ไม่พบแปลงดินเลย! กรุณาตรวจสอบหน้าจอเกมหรือปรับตำแหน่งโซนสแกน"
-        )
+        print("❌ ไม่พบแปลงดินว่างเลย! กรุณาเกี่ยวพืชออกให้หมดก่อนเริ่มรันบอท")
         return
 
     top_left_soil = soils[0]
@@ -629,17 +432,21 @@ def main_automation_loop():
 
         check_and_close_popups()
 
+        # ข้อ 2: คลิกแปลงซ้ายบนสุด
         print(f"\n👉 [ข้อ 2] คลิกแปลงซ้ายบนสุดที่ {top_left_soil}")
         pyautogui.click(top_left_soil[0], top_left_soil[1])
         time.sleep(0.6)
 
+        # ข้อ 3: สแกนหาเมล็ดข้าวโพด (สูงกว่าแปลงประมาณ 2 เท่า)
         seed_pos = find_seed_above_soil(top_left_soil, s_height)
         print(f"🌽 [ข้อ 3] พบพิกัดเมล็ดข้าวโพดที่: {seed_pos}")
 
+        # ข้อ 4: คลิกเมาส์ลากจากเมล็ดข้าวโพดไปทุกแปลงตามลำดับ
         print(f"🚜 [ข้อ 4] กำลังลากเมล็ดปลูกต่อเนื่องทั้ง {len(soils)} แปลง...")
         drag_smooth_path(seed_pos, soils)
         time.sleep(1.0)
 
+        # ข้อ 5: Loop รอดูข้าวโพดสุก (+1 เท่าความสูง)
         print("⏳ [ข้อ 5] กำลังรอข้าวโพดสุกทุกแปลง...")
         while not check_all_crops_ripe(soils, s_height):
             if keyboard.is_pressed("q"):
@@ -648,19 +455,22 @@ def main_automation_loop():
 
         print("✨ ข้าวโพดสุกครบทุกแปลงแล้ว!")
 
+        # ข้อ 6: เมื่อสุกครบให้คลิกแปลงซ้ายบนสุด
         print(f"👉 [ข้อ 6] คลิกแปลงซ้ายบนสุดที่ {top_left_soil}")
         pyautogui.click(top_left_soil[0], top_left_soil[1])
         time.sleep(0.6)
 
+        # ข้อ 7: สแกนหาเคียวบริเวณซ้ายบนของแปลง
         sickle_pos = find_sickle_near_soil(top_left_soil)
         print(f"⛏️ [ข้อ 7] พบพิกัดเคียวที่: {sickle_pos}")
 
+        # ข้อ 8: คลิกเมาส์ลากจากเคียวไปทุกแปลงตามลำดับ
         print(f"🚜 [ข้อ 8] กำลังลากเคียวเกี่ยวข้าวโพดทั้ง {len(soils)} แปลง...")
         drag_smooth_path(sickle_pos, soils)
         time.sleep(1.5)
 
+        # ข้อ 9: ทำวนกลับไปทำข้อ 2 ใหม่
         print("🔄 [ข้อ 9] เกี่ยวเสร็จสิ้น จบรอบ! เริ่มต้นทำข้อ 2 ใหม่...")
-
 
 if __name__ == "__main__":
     print("🤖 เริ่มต้นบอท Hay Day (Sequential Path Dragging)")
